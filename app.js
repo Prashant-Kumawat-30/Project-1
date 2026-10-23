@@ -58,7 +58,7 @@ const store = MongoStore.create({
     touchAfter: 24 * 3600,
 })
 
-store.on("error", () => {
+store.on("error", (err) => {
     console.log("ERROR in MONGO SESSION STORE", err);
 })
 
@@ -83,10 +83,6 @@ app.use(flash()); //remember the flash will come before routes
 
 app.use(passport.initialize());
 app.use(passport.session());
-passport.use(new LocalStrategy(User.authenticate()));
-
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
 
 app.use((req, res, next) => {
     res.locals.success = req.flash("success");
@@ -94,6 +90,13 @@ app.use((req, res, next) => {
     res.locals.currUser = req.user;
     next();
 })
+
+passport.use(new LocalStrategy(User.authenticate()));
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+
 
 app.use("/listings", listingRouter); // these are routes //const listings = require("./routes/listing.js");
 app.use("/listings/:id/reviews", reviewRouter);
@@ -108,8 +111,4 @@ app.use((err, req, res, next) => {
     let {statusCode=500, message="something went wrong!"} = err;
     res.status(statusCode).render("Error.ejs", {message});
     // res.status(statusCode).send(message);
-});
-
-app.listen(8080, (req, res) => {
-    console.log("server is listening on the port 8080");
 });
