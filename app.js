@@ -1,7 +1,9 @@
-const dns = require("dns");
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
-
 require("dotenv").config();
+
+// Node's SRV resolver can fail with the network's configured DNS server.
+// Use public resolvers so mongodb+srv Atlas hostnames can be discovered.
+const dns = require("node:dns");
+dns.setServers(["1.1.1.1", "1.0.0.1"]);
 
 const express = require("express"); //1
 const app = express(); 
@@ -25,23 +27,6 @@ const userRouter = require("./routes/user.js");
 // const MONGO_URL = "mongodb://127.0.0.1:27017/wanderlust";
 const dbUrl = process.env.ATLASDB_URL;
 
-async function main() {
-    console.log("Connecting to MongoDB Atlas...");
-    await mongoose.connect(dbUrl);
-}
-
-main()
-    .then(() => {
-        console.log("Connected to DB");
-
-        app.listen(8080, () => {
-            console.log("Server is listening on port 8080");
-        });
-    })
-    .catch((err) => {
-        console.error("MongoDB connection failed:", err);
-    });
-
 //this is to require the path from different directories
 app.set("view engine", "ejs"); // This tell express <--"I am going to use EJS as my template engine for rendering pages." -->
 app.set("views", path.join(__dirname, "views")); //This tell express <-- "Where are my view/template files located?" -->
@@ -50,65 +35,76 @@ app.use(methodOverride("_method")); //for put and delete requests
 app.engine("ejs", ejsMate); // The boilerplate code is provided by this <-- ejsMate -->
 app.use(express.static(path.join(__dirname, "/public"))); // It tells Express: <--"Make files inside the public folder accessible directly from the browser." -->
 
-const store = MongoStore.create({
-    mongoUrl: dbUrl,
-    crypto : {
-        secret: process.env.SECRET,
-    },
-    touchAfter: 24 * 3600,
-})
-
-store.on("error", (err) => {
-    console.log("ERROR in MONGO SESSION STORE", err);
-})
-
-const  sessionOptions = {
-    store,
-    secret: process.env.SECRET,
-    resave: false,
-    saveUninitialized: true,
-    cookie: {
-        expires: Date.now() + 7 * 24 * 60 * 60 * 100,
-        maxAge:  7 * 24 * 60 * 60 * 100,
-        httpOnly: true,
-    },
-};
-
 // app.get("/", (req, res) => {
 //     res.send("Hii, I am root");
 // });
 
-app.use(session(sessionOptions));
-app.use(flash()); //remember the flash will come before routes
+async function start() {
+    if (!dbUrl) {
+        throw new Error("ATLASDB_URL is missing. Add it to your .env file.");
+    }
+    if (!process.env.SECRET) {
+        throw new Error("SECRET is missing. Add it to your .env file.");
+    }
 
-app.use(passport.initialize());
-app.use(passport.session());
+    console.log("Connecting to MongoDB Atlas...");
+    await mongoose.connect(dbUrl, {
+        family: 4,
+        serverSelectionTimeoutMS: 10000
+    });
+    console.log("Connected to DB");
 
-app.use((req, res, next) => {
-    res.locals.success = req.flash("success");
-    res.locals.error = req.flash("error");
-    res.locals.currUser = req.user;
-    next();
-})
+    // Reuse Mongoose's connection so sessions do not start a second Atlas connection.
+    const store = MongoStore.create({
+        client: mongoose.connection.getClient(),
+        crypto: { secret: process.env.SECRET },
+        touchAfter: 24 * 3600,
+    });
+    store.on("error", (err) => {
+        console.error("MongoDB session store error:", err);
+    });
 
-passport.use(new LocalStrategy(User.authenticate()));
+    app.use(session({
+        store,
+        secret: process.env.SECRET,
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            httpOnly: true,
+        },
+    }));
+    app.use(flash());
+    app.use(passport.initialize());
+    app.use(passport.session());
 
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+    app.use((req, res, next) => {
+        res.locals.success = req.flash("success");
+        res.locals.error = req.flash("error");
+        res.locals.currUser = req.user;
+        next();
+    });
 
+    passport.use(new LocalStrategy(User.authenticate()));
+    passport.serializeUser(User.serializeUser());
+    passport.deserializeUser(User.deserializeUser());
 
+    app.use("/listings", listingRouter);
+    app.use("/listings/:id/reviews", reviewRouter);
+    app.use("/", userRouter);
+    app.use((req, res, next) => next(new ExpressError(404, "Page Not Found!")));
+    app.use((err, req, res, next) => {
+        const { statusCode = 500, message = "something went wrong!" } = err;
+        res.status(statusCode).render("Error.ejs", { message });
+    });
 
-app.use("/listings", listingRouter); // these are routes //const listings = require("./routes/listing.js");
-app.use("/listings/:id/reviews", reviewRouter);
-app.use("/", userRouter);
+    app.listen(8080, () => {
+        console.log("Server is listening on port 8080");
+    });
+}
 
-app.use((req, res, next) => {
-    next(new ExpressError(404, "Page Not Found!"));
-});
-
-//Error Handler
-app.use((err, req, res, next) => {
-    let {statusCode=500, message="something went wrong!"} = err;
-    res.status(statusCode).render("Error.ejs", {message});
-    // res.status(statusCode).send(message);
+start().catch(async (err) => {
+    console.error("Application startup failed:", err);
+    await mongoose.disconnect().catch(() => {});
+    process.exitCode = 1;
 });

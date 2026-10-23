@@ -33,29 +33,56 @@ module.exports.showListing = async (req, res) => {
     });
 };
 
-module.exports.createListing = async (req, res, next) => {
-    let response;
 
+module.exports.createListing = async (req, res, next) => {
     try {
-        response = await geocodingClient.forwardGeocode({
+        console.log("1. Listing controller reached");
+
+        console.time("Mapbox request");
+
+        const response = await geocodingClient.forwardGeocode({
             query: req.body.listing.location,
             limit: 2
         }).send();
 
-        console.log("Mapbox geocoding succeeded");
-        console.log("Geocoding features:", response.body.features);
-    } catch (err) {
-        console.error("MAPBOX GEOCODING ERROR:", {
-            message: err.message,
-            status: err.status,
-            statusCode: err.statusCode,
-        });
+        console.timeEnd("Mapbox request");
+        console.log("2. Mapbox response received");
 
+        const features = response.body.features;
+
+        if (!features || features.length === 0) {
+            throw new Error("Location not found. Please enter a valid location.");
+        }
+
+        console.log("3. Mapbox geocoding succeeded");
+
+        const newListing = new Listing(req.body.listing);
+        newListing.owner = req.user._id;
+
+        newListing.image = {
+            url: req.file.path,
+            filename: req.file.filename
+        };
+
+        newListing.geometry = features[0].geometry;
+
+        console.log("4. Before saving listing");
+        console.time("MongoDB save");
+
+        const savedListing = await newListing.save();
+
+        console.timeEnd("MongoDB save");
+        console.log("5. Listing saved:", savedListing._id);
+
+        req.flash("success", "New Listing Created!");
+        return res.redirect("/listings");
+
+    } catch (err) {
+        console.error("CREATE LISTING ERROR:", err);
         return next(err);
     }
-
-    // Keep the remainder of your existing function below this point.
 };
+
 
 module.exports.renderEditForm = async (req, res) => {
         let {id} = req.params;
