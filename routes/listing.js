@@ -19,20 +19,28 @@ router
 
         upload.single("listing[image]")(req, res, (err) => {
             if (err) {
-                console.error("IMAGE UPLOAD ERROR:", {
-                    name: err.name,
-                    message: err.message,
-                    http_code: err.http_code,
-                });
-
+                console.error("IMAGE UPLOAD ERROR:", err);
                 return next(err);
             }
 
             console.log("Image upload completed");
+            console.log("Uploaded file:", req.file ? {
+                path: req.file.path,
+                filename: req.file.filename
+            } : "No file uploaded");
+
             next();
         });
     },
-    validateListing,
+    (req, res, next) => {
+        console.log("Listing validation starting");
+
+        try {
+            validateListing(req, res, next);
+        } catch (err) {
+            next(err);
+        }
+    },
     wrapAsync(listingController.createListing)
 );
 
