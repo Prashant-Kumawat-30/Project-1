@@ -13,11 +13,28 @@ router
     .route("/")
     .get(wrapAsync(listingController.index))
     .post(
-        isLoggedIn,
-        upload.single('listing[image]'),
-        validateListing, 
-        wrapAsync(listingController.createListing)
-    );
+    isLoggedIn,
+    (req, res, next) => {
+        console.log("POST /listings reached");
+
+        upload.single("listing[image]")(req, res, (err) => {
+            if (err) {
+                console.error("IMAGE UPLOAD ERROR:", {
+                    name: err.name,
+                    message: err.message,
+                    http_code: err.http_code,
+                });
+
+                return next(err);
+            }
+
+            console.log("Image upload completed");
+            next();
+        });
+    },
+    validateListing,
+    wrapAsync(listingController.createListing)
+);
 
 //New Route
 router.get("/new",isLoggedIn, listingController.renderNewForm);
