@@ -24,9 +24,6 @@ module.exports.showListing = async (req, res) => {
         return res.redirect("/listings");
     }
 
-    console.log("Listing geometry from database:", listing.geometry);
-    console.log("Coordinates from database:", listing.geometry.coordinates);
-
     res.render("listings/show.ejs", {
         listing,
         mapToken: process.env.MAP_TOKEN
@@ -36,25 +33,16 @@ module.exports.showListing = async (req, res) => {
 
 module.exports.createListing = async (req, res, next) => {
     try {
-        console.log("1. Listing controller reached");
-
-        console.time("Mapbox request");
-
         const response = await geocodingClient.forwardGeocode({
             query: req.body.listing.location,
             limit: 2
         }).send();
-
-        console.timeEnd("Mapbox request");
-        console.log("2. Mapbox response received");
 
         const features = response.body.features;
 
         if (!features || features.length === 0) {
             throw new Error("Location not found. Please enter a valid location.");
         }
-
-        console.log("3. Mapbox geocoding succeeded");
 
         const newListing = new Listing(req.body.listing);
         newListing.owner = req.user._id;
@@ -66,19 +54,12 @@ module.exports.createListing = async (req, res, next) => {
 
         newListing.geometry = features[0].geometry;
 
-        console.log("4. Before saving listing");
-        console.time("MongoDB save");
-
-        const savedListing = await newListing.save();
-
-        console.timeEnd("MongoDB save");
-        console.log("5. Listing saved:", savedListing._id);
+        await newListing.save();
 
         req.flash("success", "New Listing Created!");
         return res.redirect("/listings");
 
     } catch (err) {
-        console.error("CREATE LISTING ERROR:", err);
         return next(err);
     }
 };
